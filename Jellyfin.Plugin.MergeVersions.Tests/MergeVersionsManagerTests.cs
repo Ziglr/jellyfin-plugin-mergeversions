@@ -222,7 +222,24 @@ public class MergeVersionsManagerTests
 
         using var manager = new MergeVersionsManager(library.Object, NullLogger<MergeVersionsManager>.Instance,
             files.Object, versions.Object);
-        await manager.MergeMoviesAsync(null);
+        var controller = new MergeVersionsController(manager, NullLogger<MergeVersionsManager>.Instance)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+        var missing = await controller.MergeCatalogMovieRequestAsync("SHKD-000");
+        Assert.IsType<NotFoundObjectResult>(missing);
+        Assert.IsType<BadRequestObjectResult>(await controller.MergeCatalogMovieRequestAsync(" "));
+        Assert.Empty(versions.Invocations);
+
+        var selected = await controller.MergeCatalogMovieRequestAsync("shkd-988");
+        if (shouldMerge)
+        {
+            Assert.IsType<NoContentResult>(selected);
+        }
+        else
+        {
+            Assert.IsType<NotFoundObjectResult>(selected);
+        }
 
         Assert.Equal(shouldMerge ? 1 : 0, versions.Invocations.Count);
     }
