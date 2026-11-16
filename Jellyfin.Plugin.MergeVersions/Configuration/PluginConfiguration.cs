@@ -8,6 +8,8 @@ namespace Jellyfin.Plugin.MergeVersions.Configuration
 
         public String[] LocationsExcluded { get; set; }
 
+        public string CatalogNumberRoot { get; set; } = string.Empty;
+
         public PluginConfiguration()
         {
             LocationsExcluded = Array.Empty<String>();
