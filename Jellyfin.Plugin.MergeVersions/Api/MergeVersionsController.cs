@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using System.Net.Mime;
 using System.Threading.Tasks;
 using MediaBrowser.Common.Api;
@@ -31,6 +33,25 @@ namespace Jellyfin.Plugin.MergeVersions.Api
             _mergeVersionsManager = mergeVersionsManager;
 
             _logger = logger;
+        }
+
+        [HttpGet("PreviewMovies")]
+        public ActionResult PreviewMovies([FromQuery] string key = null)
+        {
+            var groups = _mergeVersionsManager.GetMovieMergeGroups(HttpContext.RequestAborted);
+            var matches = groups.Where(group => !group.Key.StartsWith("tmdb:", StringComparison.Ordinal)
+                && (string.IsNullOrWhiteSpace(key) || string.Equals(group.Key, key.Trim(), StringComparison.OrdinalIgnoreCase)))
+                .ToArray();
+
+            return Ok(new
+            {
+                Total = matches.Length,
+                Groups = matches.Take(50).Select(group => new
+                {
+                    group.Key,
+                    Movies = group.Movies.Select(movie => new { movie.Id, movie.Name, movie.Path })
+                })
+            });
         }
 
         /// <summary>
