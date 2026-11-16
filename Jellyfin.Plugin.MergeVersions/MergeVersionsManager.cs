@@ -68,11 +68,11 @@ namespace Jellyfin.Plugin.MergeVersions
                 var duplicateMovies = GetMovieMergeGroups(cancellationToken, key);
 
                 var current = 0;
-                foreach (var (key, movies) in duplicateMovies)
+                foreach (var (groupKey, movies) in duplicateMovies)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var first = movies[0];
-                    _logger.LogInformation("Merging {Key}: {Name} ({Year})", key, first.Name, first.ProductionYear);
+                    _logger.LogInformation("Merging {Key}: {Name} ({Year})", groupKey, first.Name, first.ProductionYear);
                     await _videoVersions.MergeAsync(movies.Select(movie => movie.Id).ToArray(), user, cancellationToken).ConfigureAwait(false);
                     progress?.Report(++current / (double)duplicateMovies.Count * 100);
                 }
