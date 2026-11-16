@@ -38,10 +38,8 @@ namespace Jellyfin.Plugin.MergeVersions.Api
         [HttpGet("PreviewMovies")]
         public ActionResult PreviewMovies([FromQuery] string key = null)
         {
-            var groups = _mergeVersionsManager.GetMovieMergeGroups(HttpContext.RequestAborted);
-            var matches = groups.Where(group => !group.Key.StartsWith("tmdb:", StringComparison.Ordinal)
-                && (string.IsNullOrWhiteSpace(key) || string.Equals(group.Key, key.Trim(), StringComparison.OrdinalIgnoreCase)))
-                .ToArray();
+            var groups = _mergeVersionsManager.GetMovieMergeGroups(HttpContext.RequestAborted, string.IsNullOrWhiteSpace(key) ? null : key.Trim());
+            var matches = groups.Where(group => !group.Key.StartsWith("tmdb:", StringComparison.Ordinal)).ToArray();
 
             return Ok(new
             {
@@ -66,6 +64,23 @@ namespace Jellyfin.Plugin.MergeVersions.Api
             _logger.LogInformation("Starting a manual refresh, looking up for repeated versions");
             await _mergeVersionsManager.MergeMoviesAsync(null, User, HttpContext.RequestAborted);
             _logger.LogInformation("Completed refresh");
+            return NoContent();
+        }
+
+        [HttpPost("MergeCatalogMovie")]
+        public async Task<ActionResult> MergeCatalogMovieRequestAsync([FromQuery] string key)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return BadRequest("Enter a catalog number.");
+            }
+
+            var merged = await _mergeVersionsManager.MergeCatalogMovieAsync(key, User, HttpContext.RequestAborted);
+            if (merged == 0)
+            {
+                return NotFound("No eligible version group for this catalog number.");
+            }
+
             return NoContent();
         }
 
