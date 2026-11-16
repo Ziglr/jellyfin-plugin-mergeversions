@@ -2,7 +2,7 @@
 <html>
 
 <head>
-    <title>TMDb Box Sets</title>
+    <title>Merge Versions</title>
 </head>
 
 <body>
@@ -17,8 +17,13 @@
                             href="https://github.com/danieladov/jellyfin-plugin-mergeversions">Help</a>
                     </div>
                     <div class="verticalSection">
-                        <p>This plugin relies on the TMDb provider
-                            Please make sure it is enabled!</p>
+                        <label for="catalogNumberRoot">Catalog-number STRM directory</label>
+                        <input id="catalogNumberRoot" type="text" class="emby-input" placeholder="/Volumes/Storage/OpenList/strm" />
+                        <p>Save an absolute directory path to match STRM movies below it by their title and filename catalog number. Movies elsewhere use TMDb.</p>
+                        <label for="catalogNumberPreviewKey">Catalog number to preview (optional)</label>
+                        <input id="catalogNumberPreviewKey" type="text" class="emby-input" placeholder="SHKD-988" />
+                        <button is="emby-button" type="button" class="raised block" onclick="previewCatalogMovies()">Preview Catalog Groups</button>
+                        <pre id="catalogNumberPreview" aria-live="polite" style="white-space: pre-wrap"></pre>
                         <br />
                     </div>
                     <br />
@@ -52,6 +57,26 @@
 
             var pluginId = "f21bbed8-3a97-4d8b-88b2-48aaa65427cb";
 
+
+            function previewCatalogMovies() {
+                var output = document.getElementById('catalogNumberPreview');
+                var key = document.getElementById('catalogNumberPreviewKey').value.trim();
+                output.textContent = 'Scanning eligible movies…';
+                ApiClient.fetch({
+                    url: ApiClient.getUrl('MergeVersions/PreviewMovies', key ? { key: key } : {}),
+                    type: 'GET',
+                    dataType: 'json'
+                }).then(function (result) {
+                    var lines = result.Groups.map(function (group) {
+                        return group.Key + '\n' + group.Movies.map(function (movie) {
+                            return '  ' + movie.Path;
+                        }).join('\n');
+                    });
+                    output.textContent = result.Total + ' eligible group(s), up to 50 shown.' + '\n\n' + lines.join('\n\n');
+                }).catch(function () {
+                    output.textContent = 'Could not preview movie groups.';
+                });
+            }
 
             function mergeMovies() {
                 var request = {
@@ -114,11 +139,8 @@
             var config = undefined;
 
             ApiClient.getPluginConfiguration(pluginId).then(function (savedConfig) {
-                config = savedConfig;
-
-                if (!config) {
-                    config.LocationsExcluded = [];
-                }
+                config = savedConfig || { LocationsExcluded: [] };
+                document.getElementById('catalogNumberRoot').value = config.CatalogNumberRoot || '';
 
                 ApiClient.getVirtualFolders().then(function (virtualFolders) {
                     loadVirtualFolders(config, virtualFolders);
@@ -171,6 +193,7 @@
 
                 ApiClient.getPluginConfiguration(pluginId).then(function (config) {
                     config.LocationsExcluded = folders;
+                    config.CatalogNumberRoot = document.getElementById('catalogNumberRoot').value.trim();
                     ApiClient.updatePluginConfiguration(pluginId, config).then(function (res) {
                         Dashboard.processPluginConfigurationUpdateResult(res);
                     });
