@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Security.Claims;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
@@ -16,6 +19,12 @@ namespace Jellyfin.Plugin.MergeVersions
 {
     public class MergeVersionsManager : IDisposable
     {
+        private static readonly Regex CatalogNumber = new(
+            @"^(?:(?<prefix>FC2[ _-]*PPV)[ _-]*(?<number>[0-9]{4,10})|(?<prefix>[A-Z][A-Z0-9]{1,19})[ _-]+(?<number>[0-9]{2,9})|(?<prefix>[A-Z]{2,20})(?<number>[0-9]{2,9}))(?![A-Z0-9])",
+            RegexOptions.CultureInvariant);
+        private static readonly Regex VersionSuffix = new(@"^(?:[ _-]+(?:UC|C|U))?$", RegexOptions.CultureInvariant);
+        private static readonly SemaphoreSlim MovieMergeLock = new(1, 1);
+
         private readonly ILibraryManager _libraryManager;
         private readonly Timer _timer;
         private readonly ILogger<MergeVersionsManager> _logger; // TODO logging
@@ -39,33 +48,127 @@ namespace Jellyfin.Plugin.MergeVersions
         public async Task MergeMoviesAsync(IProgress<double> progress, ClaimsPrincipal user = null, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            _logger.LogInformation("Scanning for repeated movies");
+            await MovieMergeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                _logger.LogInformation("Scanning for repeated movies");
+                var duplicateMovies = GetMovieMergeGroups(cancellationToken);
 
-            var duplicateMovies = GetMoviesFromLibrary()
-                .GroupBy(x => x.ProviderIds["Tmdb"])
-                .Where(group => group.Count() > 1 &&
-                group.Any(movie => movie.PrimaryVersionId == null &&
-                                    !movie.LinkedAlternateVersions.Any()))
-                .ToList();
+                var current = 0;
+                foreach (var (key, movies) in duplicateMovies)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var first = movies[0];
+                    _logger.LogInformation("Merging {Key}: {Name} ({Year})", key, first.Name, first.ProductionYear);
+                    await _videoVersions.MergeAsync(movies.Select(movie => movie.Id).ToArray(), user, cancellationToken).ConfigureAwait(false);
+                    progress?.Report(++current / (double)duplicateMovies.Count * 100);
+                }
 
-            var current = 0;
-            foreach (var movies in duplicateMovies)
+                cancellationToken.ThrowIfCancellationRequested();
+                progress?.Report(100);
+            }
+            finally
+            {
+                MovieMergeLock.Release();
+            }
+        }
+
+        internal List<(string Key, Movie[] Movies)> GetMovieMergeGroups(CancellationToken cancellationToken)
+        {
+            var root = Plugin.Instance.PluginConfiguration.CatalogNumberRoot?.Trim();
+            var useCatalog = !string.IsNullOrEmpty(root) && Path.IsPathFullyQualified(root);
+            var catalog = new List<(string Key, Movie Movie, bool Matches)>();
+            var standard = new List<Movie>();
+            foreach (var movie in GetMoviesFromLibrary())
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var first = movies.First();
-                _logger.LogInformation("Merging {Name} ({Year})", first.Name, first.ProductionYear);
-                await _videoVersions.MergeAsync(movies.Select(e => e.Id).ToArray(), user, cancellationToken).ConfigureAwait(false);
-                progress?.Report(++current / (double)duplicateMovies.Count * 100);
+                if (useCatalog && !string.IsNullOrEmpty(movie.Path)
+                    && string.Equals(Path.GetExtension(movie.Path), ".strm", StringComparison.OrdinalIgnoreCase)
+                    && _fileSystem.ContainsSubPath(root, movie.Path))
+                {
+                    var filename = Normalize(Path.GetFileNameWithoutExtension(movie.Path));
+                    var file = CatalogNumber.Match(filename);
+                    if (file.Success)
+                    {
+                        var key = GetCatalogKey(file);
+                        var title = CatalogNumber.Match(Normalize(movie.Name));
+                        catalog.Add((key, movie, title.Success && GetCatalogKey(title) == key
+                            && VersionSuffix.IsMatch(filename[file.Length..])));
+                    }
+                }
+                else if (movie.ProviderIds.ContainsKey("Tmdb"))
+                {
+                    standard.Add(movie);
+                }
             }
 
-            cancellationToken.ThrowIfCancellationRequested();
-            progress?.Report(100);
+            var groups = standard
+                .GroupBy(movie => movie.ProviderIds["Tmdb"])
+                .Where(group => group.Count() > 1 && group.Any(IsUnlinked))
+                .Select(group => ($"tmdb:{group.Key}", group.ToArray()))
+                .ToList();
+            groups.AddRange(catalog.GroupBy(item => item.Key, StringComparer.Ordinal)
+                .Where(group => group.All(item => item.Matches))
+                .Select(group => (Key: group.Key, Movies: group.Select(item => item.Movie).ToArray()))
+                .Where(group => CanMergeCatalogGroup(group.Movies))
+                .OrderBy(group => group.Key, StringComparer.Ordinal));
+            return groups;
+        }
+
+        private static bool CanMergeCatalogGroup(Movie[] movies)
+        {
+            if (movies.Length < 2 || !movies.Any(IsUnlinked)
+                || movies.Any(movie => movie.IsStacked || movie.LocalAlternateVersions.Length > 0))
+            {
+                return false;
+            }
+
+            var primaries = movies.Where(movie => movie.LinkedAlternateVersions.Length > 0).ToArray();
+            if (primaries.Length == 0)
+            {
+                return movies.All(IsUnlinked);
+            }
+
+            if (primaries.Length != 1 || primaries[0].PrimaryVersionId.HasValue)
+            {
+                return false;
+            }
+
+            var primary = primaries[0];
+            var linked = primary.LinkedAlternateVersions.Select(item => item.ItemId).ToHashSet();
+            var alternates = movies.Where(movie => movie.PrimaryVersionId == primary.Id)
+                .Select(movie => (Guid?)movie.Id);
+            return linked.Count > 0 && linked.SetEquals(alternates)
+                && movies.All(movie => movie.PrimaryVersionId is null || movie.PrimaryVersionId == primary.Id);
+        }
+
+        private static bool IsUnlinked(Movie movie) =>
+            movie.PrimaryVersionId is null && movie.LinkedAlternateVersions.Length == 0;
+
+        private static string Normalize(string value) =>
+            (value ?? string.Empty).Normalize(NormalizationForm.FormKC).ToUpperInvariant().TrimStart()
+                .Replace('‐', '-').Replace('‑', '-').Replace('‒', '-').Replace('–', '-')
+                .Replace('—', '-').Replace('−', '-');
+
+        private static string GetCatalogKey(Match match)
+        {
+            var prefix = match.Groups["prefix"].Value;
+            if (prefix.StartsWith("FC2", StringComparison.Ordinal))
+            {
+                prefix = prefix.Replace(" ", "").Replace("_", "").Replace("-", "");
+                if (prefix == "FC2PPV")
+                {
+                    prefix = "FC2-PPV";
+                }
+            }
+
+            return $"{prefix}-{match.Groups["number"].Value}";
         }
 
         public async Task SplitMoviesAsync(IProgress<double> progress, ClaimsPrincipal user = null, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var movies = GetMoviesFromLibrary();
+            var movies = GetMoviesFromLibrary().Where(movie => movie.ProviderIds.ContainsKey("Tmdb")).ToList();
             var current = 0;
             foreach (var movie in movies)
             {
@@ -140,8 +243,7 @@ namespace Jellyfin.Plugin.MergeVersions
                             Recursive = true,
                         }
                 )
-                .Select(m => m as Movie)
-                .Where(m => m.ProviderIds.ContainsKey("Tmdb"))
+                .OfType<Movie>()
                 .Where(IsEligible)
                 .ToList();
         }
