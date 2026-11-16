@@ -1,11 +1,11 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Model.Tasks;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.MergeVersions.ScheduledTasks
+namespace Jellyfin.Plugin.CatalogVersions.ScheduledTasks
 {
     public class MergeMoviesTask : IScheduledTask
     {
@@ -30,15 +30,8 @@ namespace Jellyfin.Plugin.MergeVersions.ScheduledTasks
 
         public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
         {
-            // Run this task every 24 hours
-            return new[]
-            {
-                new TaskTriggerInfo
-                {
-                    Type = TaskTriggerInfoType.IntervalTrigger,
-                    IntervalTicks = TimeSpan.FromHours(24).Ticks
-                }
-            };
+            // Enable a schedule only after validating a pilot merge.
+            return Array.Empty<TaskTriggerInfo>();
         }
 
         public Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
@@ -46,10 +39,10 @@ namespace Jellyfin.Plugin.MergeVersions.ScheduledTasks
             return Execute(cancellationToken, progress);
         }
 
-        public string Name => "Merge All Movies";
-        public string Key => "MergeMoviesTask";
+        public string Name => "Catalog Versions: Merge All Movies";
+        public string Key => "CatalogVersions.MergeMovies";
         public string Description => "Scans all libraries to merge repeated movies";
-        public string Category => "Merge Versions";
+        public string Category => "Catalog Versions";
     }
 
     public class MergeEpisodesTask : IScheduledTask
@@ -76,15 +69,8 @@ namespace Jellyfin.Plugin.MergeVersions.ScheduledTasks
 
         public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
         {
-            // Run this task every 24 hours
-            return new[]
-            {
-                new TaskTriggerInfo
-                {
-                    Type = TaskTriggerInfoType.IntervalTrigger,
-                    IntervalTicks = TimeSpan.FromHours(24).Ticks
-                }
-            };
+            // Enable a schedule only after validating a pilot merge.
+            return Array.Empty<TaskTriggerInfo>();
         }
 
         public Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
@@ -92,9 +78,9 @@ namespace Jellyfin.Plugin.MergeVersions.ScheduledTasks
             return Execute(cancellationToken, progress);
         }
 
-        public string Name => "Merge All Episodes";
-        public string Key => "MergeEpisodesTask";
+        public string Name => "Catalog Versions: Merge All Episodes";
+        public string Key => "CatalogVersions.MergeEpisodes";
         public string Description => "Merges all repeated episodes";
-        public string Category => "Merge Versions";
+        public string Category => "Catalog Versions";
     }
 }

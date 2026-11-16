@@ -11,6 +11,6 @@
     <PackageReference Include="Moq" Version="4.18.4" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" PrivateAssets="all" />
-    <ProjectReference Include="../Jellyfin.Plugin.MergeVersions/Jellyfin.Plugin.MergeVersions.csproj" />
+    <ProjectReference Include="../Jellyfin.Plugin.CatalogVersions/Jellyfin.Plugin.CatalogVersions.csproj" />
   </ItemGroup>
 </Project>

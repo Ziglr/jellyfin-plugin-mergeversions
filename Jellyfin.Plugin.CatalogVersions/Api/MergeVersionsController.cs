@@ -8,14 +8,14 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.MergeVersions.Api
+namespace Jellyfin.Plugin.CatalogVersions.Api
 {
     /// <summary>
-    /// The Merge Versions api controller.
+    /// The Catalog Versions api controller.
     /// </summary>
     [ApiController]
     [Authorize(Policy = Policies.RequiresElevation)]
-    [Route("MergeVersions")]
+    [Route("CatalogVersions")]
     [Produces(MediaTypeNames.Application.Json)]
     public class MergeVersionsController : ControllerBase
     {

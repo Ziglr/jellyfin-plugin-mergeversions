@@ -15,7 +15,7 @@ using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.IO;
 using Microsoft.Extensions.Logging;
 
-namespace Jellyfin.Plugin.MergeVersions
+namespace Jellyfin.Plugin.CatalogVersions
 {
     public class MergeVersionsManager : IDisposable
     {

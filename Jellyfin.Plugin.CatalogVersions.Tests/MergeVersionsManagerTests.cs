@@ -1,7 +1,7 @@
 using System.Security.Claims;
-using Jellyfin.Plugin.MergeVersions.Api;
-using Jellyfin.Plugin.MergeVersions.Configuration;
-using Jellyfin.Plugin.MergeVersions.ScheduledTasks;
+using Jellyfin.Plugin.CatalogVersions.Api;
+using Jellyfin.Plugin.CatalogVersions.Configuration;
+using Jellyfin.Plugin.CatalogVersions.ScheduledTasks;
 using MediaBrowser.Common.Api;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Entities;
@@ -17,10 +17,30 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
-namespace Jellyfin.Plugin.MergeVersions.Tests;
+namespace Jellyfin.Plugin.CatalogVersions.Tests;
 
 public class MergeVersionsManagerTests
 {
+    [Fact]
+    public void IndependentIdentityAndOptInSchedules()
+    {
+        var paths = new Mock<IServerApplicationPaths>();
+        paths.SetupGet(p => p.PluginsPath).Returns(AppContext.BaseDirectory);
+        var plugin = new TestPlugin(paths.Object);
+        Assert.Equal("Catalog Versions", plugin.Name);
+        Assert.Equal(Guid.Parse("25bfeb4e-673e-4969-a92c-db3d990a3a80"), plugin.Id);
+        Assert.Equal("Jellyfin.Plugin.CatalogVersions", typeof(Plugin).Assembly.GetName().Name);
+        Assert.Equal("Catalog Versions", Assert.Single(plugin.GetPages()).Name);
+        Assert.Equal("CatalogVersions", Assert.Single(typeof(MergeVersionsController)
+            .GetCustomAttributes(typeof(RouteAttribute), true).Cast<RouteAttribute>()).Template);
+        var movies = new MergeMoviesTask(null, NullLogger<MergeVersionsManager>.Instance);
+        var episodes = new MergeEpisodesTask(null, NullLogger<MergeVersionsManager>.Instance);
+        Assert.Equal("CatalogVersions.MergeMovies", movies.Key);
+        Assert.Equal("CatalogVersions.MergeEpisodes", episodes.Key);
+        Assert.Empty(movies.GetDefaultTriggers());
+        Assert.Empty(episodes.GetDefaultTriggers());
+    }
+
     [Theory]
     [InlineData("MergeMovies")]
     [InlineData("SplitMovies")]

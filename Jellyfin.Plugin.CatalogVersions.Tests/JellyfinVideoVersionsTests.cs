@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
 
-namespace Jellyfin.Plugin.MergeVersions.Tests;
+namespace Jellyfin.Plugin.CatalogVersions.Tests;
 
 public class JellyfinVideoVersionsTests
 {
