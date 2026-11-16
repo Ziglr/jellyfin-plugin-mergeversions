@@ -23,6 +23,7 @@
                         <label for="catalogNumberPreviewKey">Catalog number to preview (optional)</label>
                         <input id="catalogNumberPreviewKey" type="text" class="emby-input" placeholder="SHKD-988" />
                         <button is="emby-button" type="button" class="raised block" onclick="previewCatalogMovies()">Preview Catalog Groups</button>
+                        <button is="emby-button" type="button" class="raised block" onclick="mergeCatalogMovie()">Merge This Catalog Group</button>
                         <pre id="catalogNumberPreview" aria-live="polite" style="white-space: pre-wrap"></pre>
                         <br />
                     </div>
@@ -75,6 +76,28 @@
                     output.textContent = result.Total + ' eligible group(s), up to 50 shown.' + '\n\n' + lines.join('\n\n');
                 }).catch(function () {
                     output.textContent = 'Could not preview movie groups.';
+                });
+            }
+
+            function mergeCatalogMovie() {
+                var output = document.getElementById('catalogNumberPreview');
+                var key = document.getElementById('catalogNumberPreviewKey').value.trim();
+                if (!key) {
+                    output.textContent = 'Enter a catalog number to merge.';
+                    return;
+                }
+
+                if (!window.confirm('Merge the versions for ' + key + '?')) {
+                    return;
+                }
+
+                ApiClient.fetch({
+                    url: ApiClient.getUrl('MergeVersions/MergeCatalogMovie', { key: key }),
+                    type: 'POST'
+                }).then(function () {
+                    output.textContent = 'Merged ' + key + '.';
+                }).catch(function () {
+                    output.textContent = 'Merge did not complete. Preview the catalog number again and check the server log.';
                 });
             }
 
