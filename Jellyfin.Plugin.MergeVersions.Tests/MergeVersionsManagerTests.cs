@@ -191,6 +191,42 @@ public class MergeVersionsManagerTests
         versions.Verify(v => v.MergeAsync(It.IsAny<Guid[]>(), It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Theory]
+    [InlineData("ＳＨＫＤ－９８８ Localized title", "SHKD-988-UC.strm", true)]
+    [InlineData("shkd 988 Another title", "SHKD_988-C.strm", true)]
+    [InlineData("SHKD988 Original title", "SHKD-988-U.strm", true)]
+    [InlineData("SHKD-989 Wrong scrape", "SHKD-988-C.strm", false)]
+    [InlineData("SHKD-988 First part", "SHKD-988-1.strm", false)]
+    [InlineData("SHKD-988 First part", "SHKD-988-A.strm", false)]
+    public async Task CatalogMoviesCheckTitleAndFileAcrossProviders(string title, string file, bool shouldMerge)
+    {
+        const string root = "/Volumes/Storage/OpenList/strm";
+        var paths = new Mock<IServerApplicationPaths>();
+        paths.SetupGet(p => p.PluginsPath).Returns(AppContext.BaseDirectory);
+        var plugin = new TestPlugin(paths.Object);
+        plugin.PluginConfiguration.CatalogNumberRoot = root;
+
+        var original = new Movie { Id = Guid.NewGuid(), Name = "SHKD-988 Original title", Path = root + "/one/SHKD-988.strm" };
+        var alternate = new Movie { Id = Guid.NewGuid(), Name = title, Path = root + "/two/" + file };
+        original.ProviderIds["MetaTube"] = "JavBus:SHKD-988";
+        alternate.ProviderIds["MetaTube"] = "JAV321:shkd-988";
+
+        var library = new Mock<ILibraryManager>(MockBehavior.Strict);
+        library.Setup(l => l.GetItemList(It.IsAny<InternalItemsQuery>())).Returns(new List<BaseItem> { original, alternate });
+        var files = new Mock<IFileSystem>();
+        files.Setup(f => f.ContainsSubPath(root, It.IsAny<string>())).Returns(true);
+        var versions = new Mock<IVideoVersions>(MockBehavior.Strict);
+        versions.Setup(v => v.MergeAsync(
+            It.Is<Guid[]>(ids => ids.Length == 2 && ids.Contains(original.Id) && ids.Contains(alternate.Id)),
+            null, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+        using var manager = new MergeVersionsManager(library.Object, NullLogger<MergeVersionsManager>.Instance,
+            files.Object, versions.Object);
+        await manager.MergeMoviesAsync(null);
+
+        Assert.Equal(shouldMerge ? 1 : 0, versions.Invocations.Count);
+    }
+
     [Fact]
     public void ManualEntryPointsRequireElevation()
     {
