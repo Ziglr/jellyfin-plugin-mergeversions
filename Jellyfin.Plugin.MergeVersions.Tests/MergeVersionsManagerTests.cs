@@ -218,7 +218,7 @@ public class MergeVersionsManagerTests
         var versions = new Mock<IVideoVersions>(MockBehavior.Strict);
         versions.Setup(v => v.MergeAsync(
             It.Is<Guid[]>(ids => ids.Length == 2 && ids.Contains(original.Id) && ids.Contains(alternate.Id)),
-            null, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
         using var manager = new MergeVersionsManager(library.Object, NullLogger<MergeVersionsManager>.Instance,
             files.Object, versions.Object);
