@@ -45,14 +45,27 @@ namespace Jellyfin.Plugin.MergeVersions
             _timer = new Timer(_ => OnTimerElapsed(), null, Timeout.Infinite, Timeout.Infinite);
         }
 
-        public async Task MergeMoviesAsync(IProgress<double> progress, ClaimsPrincipal user = null, CancellationToken cancellationToken = default)
+        public Task MergeMoviesAsync(IProgress<double> progress, ClaimsPrincipal user = null, CancellationToken cancellationToken = default) =>
+            MergeMoviesCoreAsync(progress, user, cancellationToken);
+
+        internal Task<int> MergeCatalogMovieAsync(string key, ClaimsPrincipal user, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return Task.FromResult(0);
+            }
+
+            return MergeMoviesCoreAsync(null, user, cancellationToken, key.Trim());
+        }
+
+        private async Task<int> MergeMoviesCoreAsync(IProgress<double> progress, ClaimsPrincipal user, CancellationToken cancellationToken, string key = null)
         {
             cancellationToken.ThrowIfCancellationRequested();
             await MovieMergeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 _logger.LogInformation("Scanning for repeated movies");
-                var duplicateMovies = GetMovieMergeGroups(cancellationToken);
+                var duplicateMovies = GetMovieMergeGroups(cancellationToken, key);
 
                 var current = 0;
                 foreach (var (key, movies) in duplicateMovies)
@@ -66,6 +79,7 @@ namespace Jellyfin.Plugin.MergeVersions
 
                 cancellationToken.ThrowIfCancellationRequested();
                 progress?.Report(100);
+                return current;
             }
             finally
             {
@@ -73,7 +87,7 @@ namespace Jellyfin.Plugin.MergeVersions
             }
         }
 
-        internal List<(string Key, Movie[] Movies)> GetMovieMergeGroups(CancellationToken cancellationToken)
+        internal List<(string Key, Movie[] Movies)> GetMovieMergeGroups(CancellationToken cancellationToken, string catalogKey = null)
         {
             var root = Plugin.Instance.PluginConfiguration.CatalogNumberRoot?.Trim();
             var useCatalog = !string.IsNullOrEmpty(root) && Path.IsPathFullyQualified(root);
@@ -91,12 +105,17 @@ namespace Jellyfin.Plugin.MergeVersions
                     if (file.Success)
                     {
                         var key = GetCatalogKey(file);
+                        if (catalogKey != null && !string.Equals(key, catalogKey, StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
                         var title = CatalogNumber.Match(Normalize(movie.Name));
                         catalog.Add((key, movie, title.Success && GetCatalogKey(title) == key
                             && VersionSuffix.IsMatch(filename[file.Length..])));
                     }
                 }
-                else if (movie.ProviderIds.ContainsKey("Tmdb"))
+                else if (catalogKey == null && movie.ProviderIds.ContainsKey("Tmdb"))
                 {
                     standard.Add(movie);
                 }
