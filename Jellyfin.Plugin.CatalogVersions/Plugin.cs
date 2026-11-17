@@ -1,12 +1,12 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using Jellyfin.Plugin.MergeVersions.Configuration;
+using Jellyfin.Plugin.CatalogVersions.Configuration;
 using MediaBrowser.Controller;
 using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Serialization;
 using MediaBrowser.Common.Plugins;
 
-namespace Jellyfin.Plugin.MergeVersions
+namespace Jellyfin.Plugin.CatalogVersions
 {
     public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages 
     {
@@ -16,16 +16,16 @@ namespace Jellyfin.Plugin.MergeVersions
             Instance = this;
         }
 
-        public override string Name => "Merge Versions";
+        public override string Name => "Catalog Versions";
 
         public static Plugin Instance { get; private set; }
 
         public override string Description
-            => "Merge Versions";
+            => "Catalog Versions";
 
         public PluginConfiguration PluginConfiguration => Configuration;
 
-        private readonly Guid _id = new Guid("f21bbed8-3a97-4d8b-88b2-48aaa65427cb");
+        private readonly Guid _id = new Guid("25bfeb4e-673e-4969-a92c-db3d990a3a80");
         public override Guid Id => _id;
 
         public IEnumerable<PluginPageInfo> GetPages()
@@ -34,7 +34,7 @@ namespace Jellyfin.Plugin.MergeVersions
             {
                 new PluginPageInfo
                 {
-                    Name = "Merge Versions",
+                    Name = "Catalog Versions",
                     EmbeddedResourcePath = GetType().Namespace + ".Configuration.configurationpage.html"
                 }
             };

@@ -2,7 +2,7 @@ using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Jellyfin.Plugin.MergeVersions
+namespace Jellyfin.Plugin.CatalogVersions
 {
     public sealed class PluginServiceRegistrator : IPluginServiceRegistrator
     {

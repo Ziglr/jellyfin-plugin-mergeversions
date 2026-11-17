@@ -10,7 +10,7 @@ using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Jellyfin.Plugin.MergeVersions
+namespace Jellyfin.Plugin.CatalogVersions
 {
     /// <summary>
     /// Calls the installed server's version actions without an HTTP round trip or a bundled Jellyfin.Api assembly.

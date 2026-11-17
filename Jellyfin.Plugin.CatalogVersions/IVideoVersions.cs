@@ -3,7 +3,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Jellyfin.Plugin.MergeVersions
+namespace Jellyfin.Plugin.CatalogVersions
 {
     public interface IVideoVersions
     {

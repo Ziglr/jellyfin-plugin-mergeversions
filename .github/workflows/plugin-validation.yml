@@ -1,0 +1,24 @@
+name: Validate Jellyfin plugin
+on:
+  push:
+    branches: [master, codex/catalog-number-versions]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test-and-build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet test Jellyfin.Plugin.CatalogVersions.sln --configuration Release
+      - run: dotnet publish Jellyfin.Plugin.CatalogVersions/Jellyfin.Plugin.CatalogVersions.csproj --configuration Release --output plugin-build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Jellyfin.Plugin.CatalogVersions
+          path: plugin-build/Jellyfin.Plugin.CatalogVersions.dll
+          if-no-files-found: error

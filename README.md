@@ -1,55 +1,34 @@
-<h1 align="center">Jellyfin Merge Versions Plugin</h1>
-<h3 align="center">Part of the <a href="https://jellyfin.org">Jellyfin Project</a></h3>
+# Catalog Versions
 
-<p align="center">
-Jellyfin Merge Versions plugin is a plugin that automatically groups every repeated movie and episode.
+A Jellyfin plugin for grouping OpenList STRM versions by catalog number. Forked from [Merge Versions](https://github.com/danieladov/jellyfin-plugin-mergeversions); it has an independent plugin ID, assembly, configuration, API route, and scheduled-task keys so both plugins can be installed.
 
-</p>
+Within the configured directory, movie identity comes only from Jellyfin metadata: an exact full MetaTube ID, a normalized identical title, or the same normalized catalog number at the start of the title. Titles from different scrapers may differ when the catalog number agrees. Filenames, extensions and numbered-part suffixes do not determine identity. Parts can be grouped with full versions, but this does not concatenate them or provide sequential playback.
 
-## Install Process
+Different explicit title catalog numbers always block a connected metadata group, even if MetaTube IDs agree or records without a catalog number bridge the groups. Jellyfin logs these conflicts. Existing conflicting version relationships also prevent merging. Both operations are limited to movies inside the configured directory, minus excluded paths.
 
+## Install alongside Merge Versions
 
-## From Repository
-1. In jellyfin, go to dashboard -> plugins -> Repositories -> add and paste this link https://raw.githubusercontent.com/danieladov/JellyfinPluginManifest/master/manifest.json
-2. Go to Catalog and search for the plugin you want to install
-3. Click on it and install
-4. Restart Jellyfin
+Use the **Catalog Versions** artifact from a successful validation workflow for the revision you intend to install. The old `Jellyfin.Plugin.MergeVersions.dll` artifact cannot provide side-by-side installation. Do not use the upstream manifest to install this fork.
 
+1. Check the running Jellyfin version for compatibility: this build targets .NET 10 and references Jellyfin 12.1.0. Successful compilation alone does not verify compatibility with your installed server.
+2. Inspect existing Merge Versions task triggers and pause them for the pilot. Record their previous settings.
+3. Stop Jellyfin and back up its data/configuration outside the plugin directory.
+4. Create `~/Library/Application Support/jellyfin/plugins/Catalog Versions_12.0.3.0/` on macOS and copy only `Jellyfin.Plugin.CatalogVersions.dll` into it. Keep the original Merge Versions installation in its own directory.
+5. Restart Jellyfin and confirm both plugins load, with separate settings pages and no API-route errors.
+6. Set Catalog Versions' STRM directory to `/Volumes/Storage/OpenList/strm`. New scheduled tasks have **no default triggers**. Do not enable a schedule yet.
+7. Set exclusions so Catalog Versions and Merge Versions process different libraries.
+8. Use **合并 AV** to merge all eligible groups in the saved directory. Check a few known groups for the expected selectable sources and playback.
+9. Use **拆分 AV** to unlink matching version groups whose linked sources are all in scope. This can also unlink eligible groups created manually or by other plugins.
 
-## From .zip file
-1. Download the .zip file from release page
-2. Extract it and place the .dll file in a folder called ```plugins/Merge Versions``` under  the program data directory or inside the portable install directory
-3. Restart Jellyfin
+Plugin ID: `25bfeb4e-673e-4969-a92c-db3d990a3a80`. API prefix: `CatalogVersions`. Settings and schedules from Merge Versions are intentionally not migrated.
 
-## User Guide
-1. To merge your movies or episodes you can do it from Schedule task or directly from the configuration of the plugin.
-2. Spliting is only avaible through the configuration
+To remove this fork, stop Jellyfin and move its plugin folder outside `plugins`, then restart. Removing the DLL does not undo previously merged library relationships; restore a data backup or use Jellyfin's native version-management controls as appropriate.
 
-Merge and split use the installed Jellyfin server's native video-version actions. No URL or API key configuration is needed. Manual operations require administrator permissions.
-
-This does not migrate or repair local-version groups created by earlier plugin releases. Split follows Jellyfin's native behavior for linked alternate versions; it does not detach local alternate versions.
-
-Cancellation stops the scan between groups, after the current native operation finishes.
-
-
-
-## Build Process
-1. Clone or download this repository
-2. Ensure you have .NET Core SDK setup and installed
-3. Build plugin with following command.
-```sh
-dotnet publish Jellyfin.Plugin.MergeVersions/Jellyfin.Plugin.MergeVersions.csproj --configuration Release --output bin
-```
-4. Place the resulting .dll file in a folder called ```plugins/Merge versions``` under  the program data directory or inside the portable install directory
-
-## Tests
+## Build and validate
 
 ```sh
-dotnet test Jellyfin.Plugin.MergeVersions.sln --configuration Release
+dotnet test Jellyfin.Plugin.CatalogVersions.sln --configuration Release
+dotnet publish Jellyfin.Plugin.CatalogVersions/Jellyfin.Plugin.CatalogVersions.csproj --configuration Release --output plugin-build
 ```
 
-The tests cover controller discovery/dispatch using a test double, DI scope lifetime, error handling, authorization requirements, asynchronous completion and cancellation. They do not replace a merge/split smoke test against a Jellyfin test library.
-
-The adapter discovers `Jellyfin.Api.Controllers.VideosController` through MVC and resolves it from Jellyfin's service container. If Jellyfin changes the action signatures, operations fail with a compatibility error instead of falling back to manual relationship changes.
-
-
+Only the plugin DLL is installed. No SDK is required on the Jellyfin host. Merge and split use Jellyfin's native video-version actions; manual operations require administrator permissions. Tests do not replace live installation, playback, and scheduling checks.
