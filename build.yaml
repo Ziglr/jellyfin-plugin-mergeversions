@@ -1,7 +1,7 @@
 ---
 name: "jellyfin-plugin-catalogversions"
 guid: "25bfeb4e-673e-4969-a92c-db3d990a3a80"
-version: "12.0.1.0" # Please increment with each pull request
+version: "12.0.3.0" # Please increment with each pull request
 jellyfin_version: "12.1.0" # The earliest binary-compatible version
 owner: "Ziglr"
 nicename: "Catalog Versions"

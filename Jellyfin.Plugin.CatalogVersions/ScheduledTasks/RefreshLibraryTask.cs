@@ -39,18 +39,18 @@ namespace Jellyfin.Plugin.CatalogVersions.ScheduledTasks
             return Execute(cancellationToken, progress);
         }
 
-        public string Name => "Catalog Versions: Merge All Movies";
+        public string Name => "Catalog Versions: 合并 AV";
         public string Key => "CatalogVersions.MergeMovies";
-        public string Description => "Scans all libraries to merge repeated movies";
+        public string Description => "合并 AV 目录中的匹配影片";
         public string Category => "Catalog Versions";
     }
 
-    public class MergeEpisodesTask : IScheduledTask
+    public class SplitMoviesTask : IScheduledTask
     {
         private readonly ILogger _logger;
         private readonly MergeVersionsManager _mergeVersionsManager;
 
-        public MergeEpisodesTask(
+        public SplitMoviesTask(
             MergeVersionsManager mergeVersionsManager,
             ILogger<MergeVersionsManager> logger
         )
@@ -61,9 +61,9 @@ namespace Jellyfin.Plugin.CatalogVersions.ScheduledTasks
 
         public async Task Execute(CancellationToken cancellationToken, IProgress<double> progress)
         {
-            _logger.LogInformation("Starting plugin, Merging Episodes");
-            await _mergeVersionsManager.MergeEpisodesAsync(progress, cancellationToken: cancellationToken);
-            _logger.LogInformation("Merging Episodes task finished");
+            _logger.LogInformation("Starting plugin, Splitting AV");
+            await _mergeVersionsManager.SplitMoviesAsync(progress, cancellationToken: cancellationToken);
+            _logger.LogInformation("Splitting AV task finished");
             return;
         }
 
@@ -78,9 +78,9 @@ namespace Jellyfin.Plugin.CatalogVersions.ScheduledTasks
             return Execute(cancellationToken, progress);
         }
 
-        public string Name => "Catalog Versions: Merge All Episodes";
-        public string Key => "CatalogVersions.MergeEpisodes";
-        public string Description => "Merges all repeated episodes";
+        public string Name => "Catalog Versions: 拆分 AV";
+        public string Key => "CatalogVersions.SplitMovies";
+        public string Description => "拆分 AV 目录中的已关联版本";
         public string Category => "Catalog Versions";
     }
 }

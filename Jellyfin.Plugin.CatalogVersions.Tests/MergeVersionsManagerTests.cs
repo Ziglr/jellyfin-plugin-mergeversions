@@ -6,7 +6,6 @@ using MediaBrowser.Common.Api;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
-using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.IO;
 using MediaBrowser.Model.Serialization;
@@ -34,234 +33,134 @@ public class MergeVersionsManagerTests
         Assert.Equal("CatalogVersions", Assert.Single(typeof(MergeVersionsController)
             .GetCustomAttributes(typeof(RouteAttribute), true).Cast<RouteAttribute>()).Template);
         var movies = new MergeMoviesTask(null, NullLogger<MergeVersionsManager>.Instance);
-        var episodes = new MergeEpisodesTask(null, NullLogger<MergeVersionsManager>.Instance);
+        var episodes = new SplitMoviesTask(null, NullLogger<MergeVersionsManager>.Instance);
         Assert.Equal("CatalogVersions.MergeMovies", movies.Key);
-        Assert.Equal("CatalogVersions.MergeEpisodes", episodes.Key);
+        Assert.Equal("CatalogVersions.SplitMovies", episodes.Key);
         Assert.Empty(movies.GetDefaultTriggers());
         Assert.Empty(episodes.GetDefaultTriggers());
     }
 
-    [Theory]
-    [InlineData("MergeMovies")]
-    [InlineData("SplitMovies")]
-    [InlineData("MergeEpisodes")]
-    [InlineData("SplitEpisodes")]
-    public async Task ManualActionsWaitAndForwardUser(string operation)
+    [Fact]
+    public async Task BatchMergeProcessesMultipleGroupsWithinScope()
     {
-        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var user = new ClaimsPrincipal(new ClaimsIdentity());
+        var first = MetadataMovie("ABC-123 Film", "one.strm", "");
+        var second = MetadataMovie("ABC-123 Film", "two.strm", "");
+        var third = MetadataMovie("DEF-456 Film", "three.strm", "");
+        var fourth = MetadataMovie("DEF-456 Film", "four.strm", "");
+        var outside = MetadataMovie(first.Name, "outside.strm", "");
+        outside.Path = "/other/outside.strm";
+        var excluded = MetadataMovie(first.Name, "excluded/source.strm", "");
+
+        var calls = await MergeMetadataMovies(new[] { first, second, third, fourth, outside, excluded });
+        Assert.Equal(2, calls.Count);
+        Assert.Equal(new[] { first.Id, second.Id }, calls[0]);
+        Assert.Equal(new[] { third.Id, fourth.Id }, calls[1]);
+    }
+
+    [Fact]
+    public async Task BatchSplitOnlyTouchesPrimariesWithAllSourcesInScope()
+    {
+        var first = MetadataMovie("ABC-123 Film", "one.strm", "");
+        var second = MetadataMovie(first.Name, "two.strm", "");
+        first.LinkedAlternateVersions = new[] { new LinkedChild { ItemId = second.Id } };
+        second.PrimaryVersionId = first.Id;
+
+        var outsidePrimary = MetadataMovie("DEF-456 Film", "three.strm", "");
+        var outsideAlternate = MetadataMovie(outsidePrimary.Name, "excluded/four.strm", "");
+        outsidePrimary.LinkedAlternateVersions = new[] { new LinkedChild { ItemId = outsideAlternate.Id } };
+        outsideAlternate.PrimaryVersionId = outsidePrimary.Id;
+
         var versions = new Mock<IVideoVersions>(MockBehavior.Strict);
-        using var cancellation = new CancellationTokenSource();
-        versions.Setup(v => v.MergeAsync(It.IsAny<Guid[]>(), user, cancellation.Token)).Returns(completion.Task);
-        versions.Setup(v => v.SplitAsync(It.IsAny<Guid>(), user, cancellation.Token)).Returns(completion.Task);
-        using var manager = CreateManager(operation.Contains("Movies"), versions);
-        var controller = new MergeVersionsController(manager, NullLogger<MergeVersionsManager>.Instance)
-        {
-            ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext { User = user, RequestAborted = cancellation.Token }
-            }
-        };
-
-        var task = operation switch
-        {
-            "MergeMovies" => controller.MergeMoviesRequestAsync(),
-            "SplitMovies" => controller.SplitMoviesRequestAsync(),
-            "MergeEpisodes" => controller.MergeEpisodesRequestAsync(),
-            _ => controller.SplitEpisodesRequestAsync()
-        };
-
-        Assert.False(task.IsCompleted);
+        versions.Setup(v => v.SplitAsync(first.Id, null, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        using var manager = CreateMetadataManager(new[] { first, second, outsidePrimary, outsideAlternate }, versions);
+        await new SplitMoviesTask(manager, NullLogger<MergeVersionsManager>.Instance).ExecuteAsync(null, default);
         Assert.Single(versions.Invocations);
-        completion.SetResult();
-        Assert.IsType<NoContentResult>(await task);
-        Assert.Equal(operation.StartsWith("Merge") ? 1 : 2, versions.Invocations.Count);
     }
 
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task ScheduledTasksWaitForNativeMerge(bool movies)
+    [InlineData("A translated title", "Another title", "JavBus:123", "JavBus:123", true)]
+    [InlineData("Same title", "Same title", "JavBus:123", "Jav321:456", true)]
+    [InlineData("300MIUM-1234 Title", "３００ＭＩＵＭ－１２３４ Translated", "FANZA:300mium01234", "JavBus:300MIUM-1234", true)]
+    [InlineData("FC2-PPV-1234567 Title", "FC2 PPV 1234567 Other", "source:1", "source:2", true)]
+    [InlineData("SUPD-063 Title", "SUPD063 Other", "FANZA:supd00063", "JavBus:SUPD-063", true)]
+    [InlineData("300MIUM-1234 Title", "300MIUM-1235 Title", "source:1", "source:2", false)]
+    [InlineData("ＳＵＰＤ－０６３ Title", "supd 063 Different title", "JavBus:123", "Jav321:456", true)]
+    [InlineData("SUPD-063 Title", "SUPD-064 Title", "JavBus:123", "JavBus:123", false)]
+    [InlineData("Different title", "Another title", "JavBus:123", "Jav321:123", false)]
+    [InlineData("", "", "", "", false)]
+    public async Task MetadataIdentityRules(string firstTitle, string secondTitle, string firstId, string secondId, bool merge)
     {
-        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var versions = new Mock<IVideoVersions>(MockBehavior.Strict);
-        versions.Setup(v => v.MergeAsync(It.IsAny<Guid[]>(), null, It.IsAny<CancellationToken>())).Returns(completion.Task);
-        using var manager = CreateManager(movies, versions);
-        var progress = new RecordedProgress();
-        var task = movies
-            ? new MergeMoviesTask(manager, NullLogger<MergeVersionsManager>.Instance).Execute(default, progress)
-            : new MergeEpisodesTask(manager, NullLogger<MergeVersionsManager>.Instance).Execute(default, progress);
-
-        Assert.False(task.IsCompleted);
-        Assert.DoesNotContain(100d, progress.Values);
-        var ids = Assert.IsType<Guid[]>(Assert.Single(versions.Invocations).Arguments[0]);
-        Assert.Equal(2, ids.Length);
-
-        completion.SetResult();
-        await task;
-        Assert.Equal(100d, progress.Values.Last());
-    }
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task CancellationStopsBeforeNextGroup(bool movies)
-    {
-        using var cancellation = new CancellationTokenSource();
-        var versions = new Mock<IVideoVersions>(MockBehavior.Strict);
-        versions.Setup(v => v.MergeAsync(It.IsAny<Guid[]>(), null, cancellation.Token))
-            .Callback(() => cancellation.Cancel()).Returns(Task.CompletedTask);
-        using var manager = CreateManager(movies, versions, groups: 2);
-        var progress = new RecordedProgress();
-
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => movies
-            ? manager.MergeMoviesAsync(progress, cancellationToken: cancellation.Token)
-            : manager.MergeEpisodesAsync(progress, cancellationToken: cancellation.Token));
-
-        Assert.Single(versions.Invocations);
-        Assert.DoesNotContain(100d, progress.Values);
+        var first = MetadataMovie(firstTitle, "arbitrary_1.strm", firstId);
+        var second = MetadataMovie(secondTitle, "unrelated_2.strm", secondId);
+        var calls = await MergeMetadataMovies(new[] { first, second });
+        Assert.Equal(merge ? 1 : 0, calls.Count);
+        if (merge) Assert.Equal(new[] { first.Id, second.Id }.Order(), calls.Single().Order());
     }
 
     [Fact]
-    public async Task FailureIsNotReportedAsSuccessfulCompletion()
+    public async Task Supd063IncludesAllFourPartsAndWholeMovie()
     {
-        var versions = new Mock<IVideoVersions>(MockBehavior.Strict);
-        versions.Setup(v => v.MergeAsync(It.IsAny<Guid[]>(), null, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("native merge failed"));
-        using var manager = CreateManager(true, versions);
-        var progress = new RecordedProgress();
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() => manager.MergeMoviesAsync(progress));
-
-        Assert.DoesNotContain(100d, progress.Values);
+        var movies = Enumerable.Range(0, 5).Select(i => MetadataMovie("SUPD-063 DIGITAL CHANNEL", $"source_{i}.strm", "")).ToArray();
+        var calls = await MergeMetadataMovies(movies);
+        Assert.Equal(movies.Select(m => m.Id).Order(), Assert.Single(calls).Order());
     }
 
     [Fact]
-    public async Task EpisodesWithDifferentNumbersDoNotMergeEvenWithSameProviderId()
+    public async Task ConflictingCatalogsCannotBeBridgedThroughMissingCatalogMetadata()
     {
-        var versions = new Mock<IVideoVersions>(MockBehavior.Strict);
-        var paths = new Mock<IServerApplicationPaths>();
-        paths.SetupGet(p => p.PluginsPath).Returns(AppContext.BaseDirectory);
-        _ = new TestPlugin(paths.Object);
-
-        var ep1_hd = new Episode { Id = Guid.NewGuid(), SeriesName = "Chumbak", ParentIndexNumber = 1, IndexNumber = 1 };
-        ep1_hd.ProviderIds["Tvdb"] = "473585";
-        var ep1_4k = new Episode { Id = Guid.NewGuid(), SeriesName = "Chumbak", ParentIndexNumber = 1, IndexNumber = 1 };
-        ep1_4k.ProviderIds["Tvdb"] = "473585";
-
-        var ep2_hd = new Episode { Id = Guid.NewGuid(), SeriesName = "Chumbak", ParentIndexNumber = 1, IndexNumber = 2 };
-        ep2_hd.ProviderIds["Tvdb"] = "473585";
-        var ep2_4k = new Episode { Id = Guid.NewGuid(), SeriesName = "Chumbak", ParentIndexNumber = 1, IndexNumber = 2 };
-        ep2_4k.ProviderIds["Tvdb"] = "473585";
-
-        var items = new List<BaseItem> { ep1_hd, ep1_4k, ep2_hd, ep2_4k };
-        var library = new Mock<ILibraryManager>(MockBehavior.Strict);
-        library.Setup(l => l.GetItemList(It.IsAny<InternalItemsQuery>())).Returns(items);
-
-        var mergedGroups = new List<Guid[]>();
-        versions.Setup(v => v.MergeAsync(It.IsAny<Guid[]>(), null, It.IsAny<CancellationToken>()))
-            .Callback<Guid[], ClaimsPrincipal, CancellationToken>((ids, u, ct) => mergedGroups.Add(ids))
-            .Returns(Task.CompletedTask);
-
-        var manager = new MergeVersionsManager(library.Object, NullLogger<MergeVersionsManager>.Instance,
-            Mock.Of<IFileSystem>(), versions.Object);
-
-        await manager.MergeEpisodesAsync(null);
-
-        Assert.Equal(2, mergedGroups.Count);
-        Assert.Contains(mergedGroups, g => g.Contains(ep1_hd.Id) && g.Contains(ep1_4k.Id) && g.Length == 2);
-        Assert.Contains(mergedGroups, g => g.Contains(ep2_hd.Id) && g.Contains(ep2_4k.Id) && g.Length == 2);
+        var first = MetadataMovie("SUPD-063 Title", "1.strm", "source:1");
+        var bridge = MetadataMovie("Missing catalog", "2.strm", "source:1");
+        var bridge2 = MetadataMovie("Missing catalog", "3.strm", "source:2");
+        var other = MetadataMovie("SUPD-064 Title", "4.strm", "source:2");
+        // Selecting a single catalog must not hide a conflict elsewhere in the component.
+        Assert.Empty(await MergeMetadataMovies(new[] { first, bridge, bridge2, other }));
     }
 
     [Fact]
-    public async Task AlreadyMergedEpisodesAreNotReMerged()
+    public async Task AlreadyLinkedMetadataGroupDoesNotMergeAgain()
     {
-        var versions = new Mock<IVideoVersions>(MockBehavior.Strict);
-        var paths = new Mock<IServerApplicationPaths>();
-        paths.SetupGet(p => p.PluginsPath).Returns(AppContext.BaseDirectory);
-        _ = new TestPlugin(paths.Object);
-
-        var primary = new Episode
-        {
-            Id = Guid.NewGuid(),
-            SeriesName = "Chumbak",
-            ParentIndexNumber = 1,
-            IndexNumber = 1,
-            LinkedAlternateVersions = new[] { new LinkedChild { Path = "/path/to/alt" } }
-        };
-        var secondary = new Episode
-        {
-            Id = Guid.NewGuid(),
-            SeriesName = "Chumbak",
-            ParentIndexNumber = 1,
-            IndexNumber = 1,
-            PrimaryVersionId = primary.Id
-        };
-
-        var items = new List<BaseItem> { primary, secondary };
-        var library = new Mock<ILibraryManager>(MockBehavior.Strict);
-        library.Setup(l => l.GetItemList(It.IsAny<InternalItemsQuery>())).Returns(items);
-
-        var manager = new MergeVersionsManager(library.Object, NullLogger<MergeVersionsManager>.Instance,
-            Mock.Of<IFileSystem>(), versions.Object);
-
-        await manager.MergeEpisodesAsync(null);
-
-        // MergeAsync should never be called because all episodes in the group are already merged
-        versions.Verify(v => v.MergeAsync(It.IsAny<Guid[]>(), It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()), Times.Never);
+        var first = MetadataMovie("SUPD-063 Title", "1.strm", "");
+        var second = MetadataMovie("SUPD-063 Title", "2.strm", "");
+        first.LinkedAlternateVersions = new[] { new LinkedChild { ItemId = second.Id } };
+        second.PrimaryVersionId = first.Id;
+        Assert.Empty(await MergeMetadataMovies(new[] { first, second }));
     }
 
-    [Theory]
-    [InlineData("ＳＨＫＤ－９８８ Localized title", "SHKD-988-UC.strm", true)]
-    [InlineData("shkd 988 Another title", "SHKD_988-C.strm", true)]
-    [InlineData("SHKD988 Original title", "SHKD-988-U.strm", true)]
-    [InlineData("SHKD-989 Wrong scrape", "SHKD-988-C.strm", false)]
-    [InlineData("SHKD-988 First part", "SHKD-988-1.strm", false)]
-    [InlineData("SHKD-988 First part", "SHKD-988-A.strm", false)]
-    public async Task CatalogMoviesCheckTitleAndFileAcrossProviders(string title, string file, bool shouldMerge)
+    private static Movie MetadataMovie(string title, string file, string id)
     {
-        const string root = "/Volumes/Storage/OpenList/strm";
-        var paths = new Mock<IServerApplicationPaths>();
-        paths.SetupGet(p => p.PluginsPath).Returns(AppContext.BaseDirectory);
-        var plugin = new TestPlugin(paths.Object);
-        plugin.PluginConfiguration.CatalogNumberRoot = root;
+        var movie = new Movie { Id = Guid.NewGuid(), Name = title, Path = "/catalog/" + file };
+        if (id.Length > 0) movie.ProviderIds["MetaTube"] = id;
+        return movie;
+    }
 
-        var original = new Movie { Id = Guid.NewGuid(), Name = "SHKD-988 Original title", Path = root + "/one/SHKD-988.strm" };
-        var alternate = new Movie { Id = Guid.NewGuid(), Name = title, Path = root + "/two/" + file };
-        original.ProviderIds["MetaTube"] = "JavBus:SHKD-988";
-        alternate.ProviderIds["MetaTube"] = "JAV321:shkd-988";
-
-        var library = new Mock<ILibraryManager>(MockBehavior.Strict);
-        library.Setup(l => l.GetItemList(It.IsAny<InternalItemsQuery>())).Returns(new List<BaseItem> { original, alternate });
-        var files = new Mock<IFileSystem>();
-        files.Setup(f => f.ContainsSubPath(root, It.IsAny<string>())).Returns(true);
+    private static async Task<List<Guid[]>> MergeMetadataMovies(Movie[] movies)
+    {
+        var calls = new List<Guid[]>();
         var versions = new Mock<IVideoVersions>(MockBehavior.Strict);
-        versions.Setup(v => v.MergeAsync(
-            It.Is<Guid[]>(ids => ids.Length == 2 && ids.Contains(original.Id) && ids.Contains(alternate.Id)),
-            It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
-
-        using var manager = new MergeVersionsManager(library.Object, NullLogger<MergeVersionsManager>.Instance,
-            files.Object, versions.Object);
+        versions.Setup(v => v.MergeAsync(It.IsAny<Guid[]>(), It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid[], ClaimsPrincipal, CancellationToken>((ids, user, ct) => calls.Add(ids)).Returns(Task.CompletedTask);
+        using var manager = CreateMetadataManager(movies, versions);
         var controller = new MergeVersionsController(manager, NullLogger<MergeVersionsManager>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
-        var missing = await controller.MergeCatalogMovieRequestAsync("SHKD-000");
-        Assert.IsType<NotFoundObjectResult>(missing);
-        Assert.IsType<BadRequestObjectResult>(await controller.MergeCatalogMovieRequestAsync(" "));
-        Assert.Empty(versions.Invocations);
+        Assert.IsType<NoContentResult>(await controller.MergeMoviesRequestAsync());
+        return calls;
+    }
 
-        var selected = await controller.MergeCatalogMovieRequestAsync("shkd-988");
-        if (shouldMerge)
-        {
-            Assert.IsType<NoContentResult>(selected);
-        }
-        else
-        {
-            Assert.IsType<NotFoundObjectResult>(selected);
-        }
-
-        Assert.Equal(shouldMerge ? 1 : 0, versions.Invocations.Count);
+    private static MergeVersionsManager CreateMetadataManager(Movie[] movies, Mock<IVideoVersions> versions)
+    {
+        var paths = new Mock<IServerApplicationPaths>();
+        paths.SetupGet(p => p.PluginsPath).Returns(AppContext.BaseDirectory);
+        var plugin = new TestPlugin(paths.Object);
+        plugin.PluginConfiguration.CatalogNumberRoot = "/catalog";
+        plugin.PluginConfiguration.LocationsExcluded = new[] { "/catalog/excluded" };
+        var library = new Mock<ILibraryManager>(MockBehavior.Strict);
+        library.Setup(l => l.GetItemList(It.IsAny<InternalItemsQuery>())).Returns(movies.Cast<BaseItem>().ToList());
+        var files = new Mock<IFileSystem>();
+        files.Setup(f => f.ContainsSubPath(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns((string parent, string path) => path.StartsWith(parent + "/", StringComparison.Ordinal));
+        return new MergeVersionsManager(library.Object, NullLogger<MergeVersionsManager>.Instance, files.Object, versions.Object);
     }
 
     [Fact]
@@ -270,33 +169,6 @@ public class MergeVersionsManagerTests
         var authorization = Assert.Single(typeof(MergeVersionsController)
             .GetCustomAttributes(typeof(AuthorizeAttribute), true).Cast<AuthorizeAttribute>());
         Assert.Equal(Policies.RequiresElevation, authorization.Policy);
-    }
-
-    private static MergeVersionsManager CreateManager(bool movies, Mock<IVideoVersions> versions, int groups = 1)
-    {
-        var paths = new Mock<IServerApplicationPaths>();
-        paths.SetupGet(p => p.PluginsPath).Returns(AppContext.BaseDirectory);
-        _ = new TestPlugin(paths.Object);
-
-        var items = Enumerable.Range(0, groups * 2).Select(index =>
-        {
-            Video item = movies ? new Movie() : new Episode();
-            item.Id = Guid.NewGuid();
-            item.Name = "Test video";
-            item.ProviderIds["Tmdb"] = (index / 2).ToString();
-            return (BaseItem)item;
-        }).ToList();
-        var library = new Mock<ILibraryManager>(MockBehavior.Strict);
-        library.Setup(l => l.GetItemList(It.IsAny<InternalItemsQuery>())).Returns(items);
-        return new MergeVersionsManager(library.Object, NullLogger<MergeVersionsManager>.Instance,
-            Mock.Of<IFileSystem>(), versions.Object);
-    }
-
-    private sealed class RecordedProgress : IProgress<double>
-    {
-        public List<double> Values { get; } = new();
-
-        public void Report(double value) => Values.Add(value);
     }
 
     private sealed class TestPlugin : Plugin

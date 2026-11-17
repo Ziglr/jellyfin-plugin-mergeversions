@@ -19,12 +19,7 @@
                     <div class="verticalSection">
                         <label for="catalogNumberRoot">Catalog-number STRM directory</label>
                         <input id="catalogNumberRoot" type="text" class="emby-input" placeholder="/Volumes/Storage/OpenList/strm" />
-                        <p>Save an absolute directory path to match STRM movies below it by their title and filename catalog number. Movies elsewhere use TMDb.</p>
-                        <label for="catalogNumberPreviewKey">Catalog number to preview (optional)</label>
-                        <input id="catalogNumberPreviewKey" type="text" class="emby-input" placeholder="SHKD-988" />
-                        <button is="emby-button" type="button" class="raised block" onclick="previewCatalogMovies()">Preview Catalog Groups</button>
-                        <button is="emby-button" type="button" class="raised block" onclick="mergeCatalogMovie()">Merge This Catalog Group</button>
-                        <pre id="catalogNumberPreview" aria-live="polite" style="white-space: pre-wrap"></pre>
+                        <p>Group movies below this directory using MetaTube IDs, metadata titles and catalog numbers in titles. Filenames and numbered parts do not affect matching. Conflicting catalog numbers are skipped. Only movies inside the saved directory are processed.</p>
                         <br />
                     </div>
                     <br />
@@ -38,14 +33,9 @@
                     <button is="emby-button" type="button" class="raised button-submit block emby-button"
                         id="refresh-library" onclick=save()><span>Save</span></button>
 
-                    <button is="emby-button" type="button" class="raised block" id="refresh-library"
-                        onclick=mergeMovies()><span>Merge All Movies</span></button>
-                    <button is="emby-button" type="button" class="raised block" id="split-library"
-                        onclick=splitMovies()><span>Split All Movies</span></button>
-                    <button is="emby-button" type="button" class="raised block" id="split-library"
-                        onclick=mergeEpisodes()><span>Merge All Episodes</span></button>
-                    <button is="emby-button" type="button" class="raised block" id="split-library"
-                        onclick=splitEpisodes()><span>Split All Episodes</span></button>
+                    <button is="emby-button" type="button" class="raised block" onclick="runAvTask('MergeMovies', '合并 AV')">合并 AV</button>
+                    <button is="emby-button" type="button" class="raised block" onclick="runAvTask('SplitMovies', '拆分 AV')">拆分 AV</button>
+                    <p id="avTaskStatus" aria-live="polite"></p>
                 </form>
             </div>
         </div>
@@ -59,106 +49,25 @@
             var pluginId = "25bfeb4e-673e-4969-a92c-db3d990a3a80";
 
 
-            function previewCatalogMovies() {
-                var output = document.getElementById('catalogNumberPreview');
-                var key = document.getElementById('catalogNumberPreviewKey').value.trim();
-                output.textContent = 'Scanning eligible movies…';
-                ApiClient.fetch({
-                    url: ApiClient.getUrl('CatalogVersions/PreviewMovies', key ? { key: key } : {}),
-                    type: 'GET',
-                    dataType: 'json'
-                }).then(function (result) {
-                    var lines = result.Groups.map(function (group) {
-                        return group.Key + '\n' + group.Movies.map(function (movie) {
-                            return '  ' + movie.Path;
-                        }).join('\n');
-                    });
-                    output.textContent = result.Total + ' eligible group(s), up to 50 shown.' + '\n\n' + lines.join('\n\n');
-                }).catch(function () {
-                    output.textContent = 'Could not preview movie groups.';
-                });
-            }
-
-            function mergeCatalogMovie() {
-                var output = document.getElementById('catalogNumberPreview');
-                var key = document.getElementById('catalogNumberPreviewKey').value.trim();
-                if (!key) {
-                    output.textContent = 'Enter a catalog number to merge.';
+            var avTaskRunning = false;
+            async function runAvTask(action, label) {
+                if (avTaskRunning || !window.confirm(label + '：处理已保存的 AV 目录，跳过排除路径。继续？')) {
                     return;
                 }
 
-                if (!window.confirm('Merge the versions for ' + key + '?')) {
-                    return;
+                var status = document.getElementById('avTaskStatus');
+                avTaskRunning = true;
+                status.textContent = label + '进行中… 请保持此页面打开。';
+                try {
+                    await ApiClient.fetch({ url: ApiClient.getUrl('CatalogVersions/' + action), type: 'POST' });
+                    status.textContent = label + '完成。';
+                } catch {
+                    status.textContent = label + '未完成，请查看 Jellyfin 日志。';
+                } finally {
+                    avTaskRunning = false;
                 }
-
-                ApiClient.fetch({
-                    url: ApiClient.getUrl('CatalogVersions/MergeCatalogMovie', { key: key }),
-                    type: 'POST'
-                }).then(function () {
-                    output.textContent = 'Merged ' + key + '.';
-                }).catch(function () {
-                    output.textContent = 'Merge did not complete. Preview the catalog number again and check the server log.';
-                });
             }
 
-            function mergeMovies() {
-                var request = {
-                    url: ApiClient.getUrl('CatalogVersions/MergeMovies'),
-                    type: 'POST'
-                };
-
-                ApiClient.fetch(request).then(function () {
-                    Dashboard.alert("Merging Movies...");
-                }).catch(function () {
-                    Dashboard.alert({
-                        message: "Unexpected error occurred!"
-                    });
-                });
-            }
-
-            function mergeEpisodes() {
-                var request = {
-                    url: ApiClient.getUrl('CatalogVersions/MergeEpisodes'),
-                    type: 'POST'
-                };
-
-                ApiClient.fetch(request).then(function () {
-                    Dashboard.alert("Merging Episodes...");
-                }).catch(function () {
-                    Dashboard.alert({
-                        message: "Unexpected error occurred!"
-                    });
-                });
-            }
-
-
-            function splitMovies() {
-                var request = {
-                    url: ApiClient.getUrl('CatalogVersions/SplitMovies'),
-                    type: 'POST'
-                };
-                ApiClient.fetch(request).then(function () {
-                    Dashboard.alert("Splitting Movies");
-                }).catch(function () {
-                    Dashboard.alert({
-                        message: "Unexpected error occurred!"
-                    });
-                });
-            }
-
-            function splitEpisodes() {
-                var request = {
-                    url: ApiClient.getUrl('CatalogVersions/SplitEpisodes'),
-                    type: 'POST'
-                };
-                ApiClient.fetch(request).then(function () {
-                    Dashboard.alert("Splitting Episodes");
-                }).catch(function () {
-                    Dashboard.alert({
-                        message: "Unexpected error occurred!"
-                    });
-                });
-            }
             var config = undefined;
 
             ApiClient.getPluginConfiguration(pluginId).then(function (savedConfig) {

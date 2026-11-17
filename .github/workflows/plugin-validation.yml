@@ -1,7 +1,9 @@
 name: Validate Jellyfin plugin
 on:
   push:
-    branches: [codex/catalog-number-versions]
+    branches: [master, codex/catalog-number-versions]
+  pull_request:
+    branches: [master]
   workflow_dispatch:
 permissions:
   contents: read
